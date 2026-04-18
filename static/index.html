@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Antigravity PathFinder — Ultra-fast route discovery for New Delhi powered by a custom Dijkstra algorithm.">
+    <title>Antigravity — New Delhi PathFinder</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- Map -->
+<div id="map"></div>
+
+<!-- Floating Search Card -->
+<div class="search-card" id="searchCard">
+
+    <!-- Header -->
+    <div class="card-header">
+        <div class="logo-icon">
+            <span class="material-symbols-outlined">route</span>
+        </div>
+        <div class="title-group">
+            <h1>Antigravity PathFinder</h1>
+            <div class="subtitle">New Delhi Route Engine</div>
+        </div>
+    </div>
+
+    <!-- Step Chips -->
+    <div class="steps-hint">
+        <div class="step-chip active" id="chipStart">
+            <span class="material-symbols-outlined">radio_button_checked</span>
+            Set Start
+        </div>
+        <div class="step-chip" id="chipEnd">
+            <span class="material-symbols-outlined">location_on</span>
+            Set End
+        </div>
+        <div class="step-chip" id="chipRoute">
+            <span class="material-symbols-outlined">directions</span>
+            Find Route
+        </div>
+    </div>
+
+    <!-- Waypoint Inputs -->
+    <div class="waypoint-section">
+        <div class="waypoint-connector"></div>
+        <div class="waypoint-row">
+            <div class="waypoint-dot start" id="dotStart"></div>
+            <div class="waypoint-input" id="inputStart">Click map to set start</div>
+        </div>
+        <div class="waypoint-row">
+            <div class="waypoint-dot end" id="dotEnd"></div>
+            <div class="waypoint-input" id="inputEnd">Click map to set end</div>
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="action-bar">
+        <button class="btn-find" id="btnFind" disabled>
+            <div class="spinner"></div>
+            <span class="btn-text">Find Route</span>
+        </button>
+        <button class="btn-clear" id="btnClear">
+            <span class="material-symbols-outlined">close</span>
+            Clear
+        </button>
+    </div>
+
+    <!-- Results Panel -->
+    <div class="results-panel" id="resultsPanel">
+        <div class="results-header">
+            <span class="material-symbols-outlined">check_circle</span>
+            <span>Route Found</span>
+        </div>
+        <div class="results-grid">
+            <div class="result-item">
+                <div class="result-label">Distance</div>
+                <div class="result-value" id="resDistance">—</div>
+            </div>
+            <div class="result-item">
+                <div class="result-label">Compute Time</div>
+                <div class="result-value speed" id="resTime">—</div>
+            </div>
+            <div class="result-item">
+                <div class="result-label">Nodes Traversed</div>
+                <div class="result-value" id="resNodes">—</div>
+            </div>
+            <div class="result-item">
+                <div class="result-label">Performance</div>
+                <div class="result-value speed" id="resPerf">—</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer">
+    <div class="toast" id="toast">
+        <span class="material-symbols-outlined" id="toastIcon">info</span>
+        <span id="toastMsg"></span>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+    "use strict";
+
+    const DELHI_CENTER = [28.5650, 77.1570];
+    const DEFAULT_ZOOM = 13;
+    const API_BASE = "/api";
+    const MIN_DISTANCE_M = 50;
+
+    /* ── Bounding box (padded by 0.01° for tolerance) ── */
+    const BOUNDS = {
+        minLat: 28.4849 - 0.01,
+        maxLat: 28.6455 + 0.01,
+        minLon: 77.0731 - 0.01,
+        maxLon: 77.2409 + 0.01,
+    };
+
+    /* ── Map ── */
+    const map = L.map("map", { zoomControl: true }).setView(DELHI_CENTER, DEFAULT_ZOOM);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19,
+    }).addTo(map);
+
+    /* ── State ── */
+    let startLatLng = null;
+    let endLatLng = null;
+    let startMarker = null;
+    let endMarker = null;
+    let routeLine = null;
+    let isComputing = false;
+
+    /* ── DOM ── */
+    const inputStart = document.getElementById("inputStart");
+    const inputEnd = document.getElementById("inputEnd");
+    const dotStart = document.getElementById("dotStart");
+    const dotEnd = document.getElementById("dotEnd");
+    const chipStart = document.getElementById("chipStart");
+    const chipEnd = document.getElementById("chipEnd");
+    const chipRoute = document.getElementById("chipRoute");
+    const btnFind = document.getElementById("btnFind");
+    const btnClear = document.getElementById("btnClear");
+    const resultsPanel = document.getElementById("resultsPanel");
+    const resDistance = document.getElementById("resDistance");
+    const resTime = document.getElementById("resTime");
+    const resNodes = document.getElementById("resNodes");
+    const resPerf = document.getElementById("resPerf");
+    const toast = document.getElementById("toast");
+    const toastIcon = document.getElementById("toastIcon");
+    const toastMsg = document.getElementById("toastMsg");
+
+    /* ── Toast System ── */
+    let toastTimer = null;
+
+    function showToast(message, type = "info", icon = "info", duration = 3000) {
+        clearTimeout(toastTimer);
+        toastMsg.textContent = message;
+        toastIcon.textContent = icon;
+        toast.className = "toast " + type;
+        requestAnimationFrame(() => {
+            toast.classList.add("visible");
+        });
+        toastTimer = setTimeout(() => {
+            toast.classList.remove("visible");
+        }, duration);
+    }
+
+    /* ── Helpers ── */
+    function formatCoord(latlng) {
+        return `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`;
+    }
+
+    function isInBounds(lat, lon) {
+        return lat >= BOUNDS.minLat && lat <= BOUNDS.maxLat &&
+               lon >= BOUNDS.minLon && lon <= BOUNDS.maxLon;
+    }
+
+    function haversineDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon / 2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    /* ── Marker Icons ── */
+    function makeIcon(color, label) {
+        return L.divIcon({
+            className: "",
+            html: `<div style="
+                position:relative; width:28px; height:28px;
+            ">
+                <div style="
+                    width:14px; height:14px;
+                    background:${color};
+                    border:3px solid white;
+                    border-radius:50%;
+                    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                    position:absolute; top:50%; left:50%;
+                    transform:translate(-50%,-50%);
+                "></div>
+            </div>`,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+        });
+    }
+
+    const startIcon = makeIcon("#1a73e8", "A");
+    const endIcon = makeIcon("#ea4335", "B");
+
+    /* ── Update UI ── */
+    function syncUI() {
+        chipStart.className = "step-chip" + (startLatLng ? " done" : " active");
+        chipEnd.className = "step-chip" + (endLatLng ? " done" : (!startLatLng ? "" : " active"));
+        chipRoute.className = "step-chip" + (startLatLng && endLatLng ? " active" : "");
+        btnFind.disabled = !(startLatLng && endLatLng) || isComputing;
+    }
+
+    /* ── Map Click ── */
+    map.on("click", function (e) {
+        if (isComputing) return;
+
+        const { lat, lng } = e.latlng;
+
+        if (!isInBounds(lat, lng)) {
+            showToast("Area not supported. Click within New Delhi.", "warning", "wrong_location");
+            return;
+        }
+
+        if (!startLatLng) {
+            startLatLng = e.latlng;
+            startMarker = L.marker(e.latlng, { icon: startIcon }).addTo(map);
+            inputStart.textContent = formatCoord(e.latlng);
+            inputStart.classList.add("filled");
+            dotStart.classList.add("filled");
+        } else if (!endLatLng) {
+            endLatLng = e.latlng;
+            endMarker = L.marker(e.latlng, { icon: endIcon }).addTo(map);
+            inputEnd.textContent = formatCoord(e.latlng);
+            inputEnd.classList.add("filled");
+            dotEnd.classList.add("filled");
+        }
+
+        syncUI();
+    });
+
+    /* ── Find Route ── */
+    btnFind.addEventListener("click", async function () {
+        if (!startLatLng || !endLatLng || isComputing) return;
+
+        const dist = haversineDistance(
+            startLatLng.lat, startLatLng.lng,
+            endLatLng.lat, endLatLng.lng
+        );
+
+        if (dist < MIN_DISTANCE_M) {
+            showToast("Start and end are too close. Pick a farther point.", "warning", "near_me");
+            return;
+        }
+
+        isComputing = true;
+        btnFind.classList.add("loading");
+        btnFind.disabled = true;
+        resultsPanel.classList.remove("visible");
+
+        if (routeLine) {
+            map.removeLayer(routeLine);
+            routeLine = null;
+        }
+
+        const params = new URLSearchParams({
+            start_lat: startLatLng.lat,
+            start_lon: startLatLng.lng,
+            end_lat: endLatLng.lat,
+            end_lon: endLatLng.lng,
+        });
+
+        try {
+            const resp = await fetch(`${API_BASE}/route?${params}`);
+            const data = await resp.json();
+
+            if (data.error || !data.path || data.path.length === 0) {
+                showToast(data.error || "No route found between these points.", "error", "error");
+                isComputing = false;
+                btnFind.classList.remove("loading");
+                syncUI();
+                return;
+            }
+
+            const latlngs = data.path.map(p => [p.lat, p.lon]);
+
+            routeLine = L.polyline(latlngs, {
+                color: "#4285f4",
+                weight: 5,
+                opacity: 0.85,
+                smoothFactor: 1,
+                lineCap: "round",
+                lineJoin: "round",
+            }).addTo(map);
+
+            map.fitBounds(routeLine.getBounds(), { padding: [60, 60] });
+
+            resDistance.textContent = data.distance_km >= 1
+                ? `${data.distance_km} km`
+                : `${data.distance_m} m`;
+            resTime.textContent = `${data.computation_ms} ms`;
+            resNodes.textContent = data.nodes_traversed.toLocaleString();
+            resPerf.textContent = data.computation_ms < 100 ? "Excellent" : data.computation_ms < 200 ? "Fast" : "OK";
+
+            resultsPanel.classList.add("visible");
+            showToast(`Route found — ${data.distance_km} km in ${data.computation_ms} ms`, "info", "check_circle");
+
+        } catch (err) {
+            showToast("Server unreachable. Check if the backend is running.", "error", "cloud_off");
+        }
+
+        isComputing = false;
+        btnFind.classList.remove("loading");
+        syncUI();
+    });
+
+    /* ── Clear Route ── */
+    btnClear.addEventListener("click", function () {
+        startLatLng = null;
+        endLatLng = null;
+        if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+        if (endMarker) { map.removeLayer(endMarker); endMarker = null; }
+        if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+
+        inputStart.textContent = "Click map to set start";
+        inputEnd.textContent = "Click map to set end";
+        inputStart.classList.remove("filled");
+        inputEnd.classList.remove("filled");
+        dotStart.classList.remove("filled");
+        dotEnd.classList.remove("filled");
+
+        resultsPanel.classList.remove("visible");
+        syncUI();
+        map.setView(DELHI_CENTER, DEFAULT_ZOOM);
+    });
+
+    syncUI();
+})();
+</script>
+
+</body>
+</html>
