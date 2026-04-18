@@ -7,6 +7,10 @@ Delhi PathFinder is a FastAPI + Leaflet web app that finds shortest routes in De
 
 It is built as a practical DSA project using real OpenStreetMap-derived node/edge data.
 
+## Live Demo
+
+- [https://delhi-pathfinder.onrender.com/](https://delhi-pathfinder.onrender.com/)
+
 ## Features
 
 - Custom Dijkstra implementation with priority queue (`heapq`)
