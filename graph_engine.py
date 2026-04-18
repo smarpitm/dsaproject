@@ -30,6 +30,20 @@ class Graph:
 
         self.node_count = len(self.coords)
         self.edge_count = len(edges_df)
+        lats = nodes_df["y"]
+        lons = nodes_df["x"]
+        self.bounds = {
+            "min_lat": float(lats.min()),
+            "max_lat": float(lats.max()),
+            "min_lon": float(lons.min()),
+            "max_lon": float(lons.max()),
+        }
+
+    def is_within_bounds(self, lat: float, lon: float, pad: float = 0.0) -> bool:
+        return (
+            self.bounds["min_lat"] - pad <= lat <= self.bounds["max_lat"] + pad
+            and self.bounds["min_lon"] - pad <= lon <= self.bounds["max_lon"] + pad
+        )
 
     def _build_spatial_index(self):
         self._node_ids = np.array(list(self.coords.keys()))

@@ -1,7 +1,10 @@
 import unittest
+from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+import main
 from main import app
 
 
@@ -27,6 +30,29 @@ class ApiSmokeTests(unittest.TestCase):
         data = bounds.json()
         self.assertLess(data["min_lat"], data["max_lat"])
         self.assertLess(data["min_lon"], data["max_lon"])
+
+    def test_route_outside_local_bounds_falls_back_to_osrm(self):
+        fake_osrm = {
+            "path": [{"lat": 28.69, "lon": 77.13}, {"lat": 28.58, "lon": 77.04}],
+            "distance_m": 12345.0,
+            "distance_km": 12.345,
+            "nodes_traversed": 2,
+            "start_node": None,
+            "end_node": None,
+            "route_source": "osrm",
+        }
+        with patch("main.fetch_osrm_route", new=AsyncMock(return_value=fake_osrm)):
+            resp = self.client.get(
+                "/api/route",
+                params={
+                    "start_lat": 28.78,
+                    "start_lon": 77.05,
+                    "end_lat": 28.50,
+                    "end_lon": 77.33,
+                },
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["route_source"], "osrm")
 
     def test_route_rejects_outside_delhi(self):
         resp = self.client.get(
@@ -55,6 +81,46 @@ class ApiSmokeTests(unittest.TestCase):
         data = resp.json()
         self.assertTrue(data["path"])
         self.assertGreater(data["distance_m"], 0)
+        self.assertEqual(data["route_source"], "local")
+
+    def test_local_failure_falls_back_to_osrm(self):
+        with patch.object(main.graph, "route", return_value={"path": []}):
+            fake_osrm = {
+                "path": [{"lat": 28.61, "lon": 77.20}, {"lat": 28.55, "lon": 77.10}],
+                "distance_m": 15000.0,
+                "distance_km": 15.0,
+                "nodes_traversed": 2,
+                "start_node": None,
+                "end_node": None,
+                "route_source": "osrm",
+            }
+            with patch("main.fetch_osrm_route", new=AsyncMock(return_value=fake_osrm)):
+                resp = self.client.get(
+                    "/api/route",
+                    params={
+                        "start_lat": 28.6139,
+                        "start_lon": 77.2090,
+                        "end_lat": 28.5562,
+                        "end_lon": 77.1000,
+                    },
+                )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["route_source"], "osrm")
+
+    def test_local_and_osrm_failure_returns_error(self):
+        with patch.object(main.graph, "route", return_value={"path": []}):
+            with patch("main.fetch_osrm_route", new=AsyncMock(return_value=None)):
+                resp = self.client.get(
+                    "/api/route",
+                    params={
+                        "start_lat": 28.6139,
+                        "start_lon": 77.2090,
+                        "end_lat": 28.5562,
+                        "end_lon": 77.1000,
+                    },
+                )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("No path found", resp.json()["error"])
 
     def test_favicon_endpoint_is_safe_without_icon(self):
         resp = self.client.get("/favicon.ico")

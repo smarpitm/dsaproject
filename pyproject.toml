@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.136.0",
+    "gunicorn>=25.3.0",
     "httpx>=0.28.0",
     "numpy>=2.4.4",
     "osmnx>=2.1.0",

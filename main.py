@@ -23,11 +23,13 @@ graph = Graph()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 DELHI_BOUNDS = {
-    "min_lat": 28.4849,
-    "max_lat": 28.6455,
-    "min_lon": 77.0731,
-    "max_lon": 77.2409,
+    "min_lat": 28.39,
+    "max_lat": 28.89,
+    "min_lon": 76.84,
+    "max_lon": 77.35,
 }
+LOCAL_BOUNDS_PAD = 0.005
+OSRM_BASE_URL = "https://routing.openstreetmap.de/routed-car/route/v1/driving/"
 
 
 def is_in_delhi(lat: float, lon: float) -> bool:
@@ -59,6 +61,40 @@ async def geocode_place(query: str) -> dict | None:
             return None
 
 
+async def fetch_osrm_route(
+    start_lat: float, start_lon: float, end_lat: float, end_lon: float
+) -> dict | None:
+    coords = f"{start_lon},{start_lat};{end_lon},{end_lat}"
+    url = f"{OSRM_BASE_URL}{coords}"
+    params = {"overview": "full", "geometries": "geojson"}
+
+    async with httpx.AsyncClient(timeout=12.0) as client:
+        try:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
+            routes = payload.get("routes", [])
+            if not routes:
+                return None
+            route = routes[0]
+            geometry = route.get("geometry", {})
+            points = geometry.get("coordinates", [])
+            if not points:
+                return None
+
+            return {
+                "path": [{"lat": p[1], "lon": p[0]} for p in points],
+                "distance_m": round(float(route.get("distance", 0.0)), 2),
+                "distance_km": round(float(route.get("distance", 0.0)) / 1000, 3),
+                "nodes_traversed": len(points),
+                "start_node": None,
+                "end_node": None,
+                "route_source": "osrm",
+            }
+        except Exception:
+            return None
+
+
 @app.get("/")
 def serve_index():
     return FileResponse("static/index.html")
@@ -85,26 +121,36 @@ async def geocode(query: str = Query(...)):
 
 
 @app.get("/api/route")
-def calculate_route(
+async def calculate_route(
     start_lat: float = Query(...),
     start_lon: float = Query(...),
     end_lat: float = Query(...),
     end_lon: float = Query(...),
 ):
-    if not is_in_delhi(start_lat, start_lon):
-        return {"error": "Start point is outside Delhi boundary."}
-    if not is_in_delhi(end_lat, end_lon):
-        return {"error": "End point is outside Delhi boundary."}
+    if not is_in_delhi(start_lat, start_lon) or not is_in_delhi(end_lat, end_lon):
+        return {"error": "Selected points are outside Delhi boundary."}
 
-    t0 = time.perf_counter()
-    result = graph.route(start_lat, start_lon, end_lat, end_lon)
-    elapsed_ms = (time.perf_counter() - t0) * 1000
+    in_local_bounds = graph.is_within_bounds(start_lat, start_lon, LOCAL_BOUNDS_PAD) and (
+        graph.is_within_bounds(end_lat, end_lon, LOCAL_BOUNDS_PAD)
+    )
 
-    print(f"[DEBUG] Dijkstra execution time: {elapsed_ms:.2f} ms")
+    local_result = None
+    if in_local_bounds:
+        t0 = time.perf_counter()
+        local_result = graph.route(start_lat, start_lon, end_lat, end_lon)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
 
-    if not result["path"]:
-        return {"error": "No path found between the selected points."}
-    return result
+        print(f"[DEBUG] Dijkstra execution time: {elapsed_ms:.2f} ms")
+        if local_result.get("path"):
+            local_result["route_source"] = "local"
+            return local_result
+
+    osrm_result = await fetch_osrm_route(start_lat, start_lon, end_lat, end_lon)
+    if osrm_result:
+        return osrm_result
+    if in_local_bounds and local_result:
+        return {"error": "No path found between the selected points in local and OSRM routing."}
+    return {"error": "No route found for selected points."}
 
 
 @app.get("/api/stats")
@@ -117,11 +163,4 @@ def graph_stats():
 
 @app.get("/api/bounds")
 def graph_bounds():
-    lats = [c[0] for c in graph.coords.values()]
-    lons = [c[1] for c in graph.coords.values()]
-    return {
-        "min_lat": min(lats),
-        "max_lat": max(lats),
-        "min_lon": min(lons),
-        "max_lon": max(lons),
-    }
+    return graph.bounds

@@ -86,6 +86,10 @@
                 <div class="result-label">Total Distance</div>
                 <div class="result-value" id="resDistance">—</div>
             </div>
+            <div class="result-item full-width">
+                <div class="result-label">Route Source</div>
+                <div class="result-value" id="resSource">—</div>
+            </div>
         </div>
     </div>
 </div>
@@ -142,6 +146,7 @@
     const btnClear = document.getElementById("btnClear");
     const resultsPanel = document.getElementById("resultsPanel");
     const resDistance = document.getElementById("resDistance");
+    const resSource = document.getElementById("resSource");
     const toast = document.getElementById("toast");
     const toastIcon = document.getElementById("toastIcon");
     const toastMsg = document.getElementById("toastMsg");
@@ -320,9 +325,14 @@
             resDistance.textContent = data.distance_km >= 1
                 ? `${data.distance_km} km`
                 : `${data.distance_m} m`;
+            resSource.textContent = (data.route_source || "local").toUpperCase();
 
             resultsPanel.classList.add("visible");
-            showToast(`Route found — ${data.distance_km} km`, "info", "check_circle");
+            showToast(
+                `Route found — ${data.distance_km} km (${(data.route_source || "local").toUpperCase()})`,
+                "info",
+                "check_circle"
+            );
 
         } catch (err) {
             showToast("Server unreachable. Check if the backend is running.", "error", "cloud_off");
@@ -346,6 +356,7 @@
         inputEnd.classList.remove("filled");
         dotStart.classList.remove("filled");
         dotEnd.classList.remove("filled");
+        resSource.textContent = "—";
 
         resultsPanel.classList.remove("visible");
         syncUI();
