@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Antigravity PathFinder — Ultra-fast route discovery for New Delhi powered by a custom Dijkstra algorithm.">
-    <title>Antigravity — New Delhi PathFinder</title>
+    <meta name="description" content="Delhi PathFinder — Ultra-fast route discovery for Delhi powered by a custom Dijkstra algorithm.">
+    <title>Delhi PathFinder</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="/static/style.css" />
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
 </head>
 <body>
 
@@ -22,8 +23,8 @@
             <span class="material-symbols-outlined">route</span>
         </div>
         <div class="title-group">
-            <h1>Antigravity PathFinder</h1>
-            <div class="subtitle">New Delhi Route Engine</div>
+            <h1>Delhi PathFinder</h1>
+            <div class="subtitle">Delhi Route Engine</div>
         </div>
     </div>
 
@@ -48,11 +49,17 @@
         <div class="waypoint-connector"></div>
         <div class="waypoint-row">
             <div class="waypoint-dot start" id="dotStart"></div>
-            <div class="waypoint-input" id="inputStart">Click map to set start</div>
+            <input type="text" class="waypoint-input" id="inputStart" placeholder="Enter start place (e.g. India Gate)">
+            <button class="btn-search" id="btnSearchStart" title="Search">
+                <span class="material-symbols-outlined">search</span>
+            </button>
         </div>
         <div class="waypoint-row">
             <div class="waypoint-dot end" id="dotEnd"></div>
-            <div class="waypoint-input" id="inputEnd">Click map to set end</div>
+            <input type="text" class="waypoint-input" id="inputEnd" placeholder="Enter end place (e.g. Connaught Place)">
+            <button class="btn-search" id="btnSearchEnd" title="Search">
+                <span class="material-symbols-outlined">search</span>
+            </button>
         </div>
     </div>
 
@@ -75,21 +82,9 @@
             <span>Route Found</span>
         </div>
         <div class="results-grid">
-            <div class="result-item">
-                <div class="result-label">Distance</div>
+            <div class="result-item full-width">
+                <div class="result-label">Total Distance</div>
                 <div class="result-value" id="resDistance">—</div>
-            </div>
-            <div class="result-item">
-                <div class="result-label">Compute Time</div>
-                <div class="result-value speed" id="resTime">—</div>
-            </div>
-            <div class="result-item">
-                <div class="result-label">Nodes Traversed</div>
-                <div class="result-value" id="resNodes">—</div>
-            </div>
-            <div class="result-item">
-                <div class="result-label">Performance</div>
-                <div class="result-value speed" id="resPerf">—</div>
             </div>
         </div>
     </div>
@@ -113,7 +108,6 @@
     const API_BASE = "/api";
     const MIN_DISTANCE_M = 50;
 
-    /* ── Bounding box (padded by 0.01° for tolerance) ── */
     const BOUNDS = {
         minLat: 28.4849 - 0.01,
         maxLat: 28.6455 + 0.01,
@@ -121,7 +115,6 @@
         maxLon: 77.2409 + 0.01,
     };
 
-    /* ── Map ── */
     const map = L.map("map", { zoomControl: true }).setView(DELHI_CENTER, DEFAULT_ZOOM);
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -129,7 +122,6 @@
         maxZoom: 19,
     }).addTo(map);
 
-    /* ── State ── */
     let startLatLng = null;
     let endLatLng = null;
     let startMarker = null;
@@ -137,9 +129,10 @@
     let routeLine = null;
     let isComputing = false;
 
-    /* ── DOM ── */
     const inputStart = document.getElementById("inputStart");
     const inputEnd = document.getElementById("inputEnd");
+    const btnSearchStart = document.getElementById("btnSearchStart");
+    const btnSearchEnd = document.getElementById("btnSearchEnd");
     const dotStart = document.getElementById("dotStart");
     const dotEnd = document.getElementById("dotEnd");
     const chipStart = document.getElementById("chipStart");
@@ -149,14 +142,10 @@
     const btnClear = document.getElementById("btnClear");
     const resultsPanel = document.getElementById("resultsPanel");
     const resDistance = document.getElementById("resDistance");
-    const resTime = document.getElementById("resTime");
-    const resNodes = document.getElementById("resNodes");
-    const resPerf = document.getElementById("resPerf");
     const toast = document.getElementById("toast");
     const toastIcon = document.getElementById("toastIcon");
     const toastMsg = document.getElementById("toastMsg");
 
-    /* ── Toast System ── */
     let toastTimer = null;
 
     function showToast(message, type = "info", icon = "info", duration = 3000) {
@@ -172,7 +161,6 @@
         }, duration);
     }
 
-    /* ── Helpers ── */
     function formatCoord(latlng) {
         return `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`;
     }
@@ -192,32 +180,18 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    /* ── Marker Icons ── */
-    function makeIcon(color, label) {
+    function makeIcon(color) {
         return L.divIcon({
             className: "",
-            html: `<div style="
-                position:relative; width:28px; height:28px;
-            ">
-                <div style="
-                    width:14px; height:14px;
-                    background:${color};
-                    border:3px solid white;
-                    border-radius:50%;
-                    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-                    position:absolute; top:50%; left:50%;
-                    transform:translate(-50%,-50%);
-                "></div>
-            </div>`,
+            html: `<div style="position:relative; width:28px; height:28px;"><div style="width:14px; height:14px; background:${color}; border:3px solid white; border-radius:50%; box-shadow:0 2px 6px rgba(0,0,0,0.3); position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);"></div></div>`,
             iconSize: [28, 28],
             iconAnchor: [14, 14],
         });
     }
 
-    const startIcon = makeIcon("#1a73e8", "A");
-    const endIcon = makeIcon("#ea4335", "B");
+    const startIcon = makeIcon("#1a73e8");
+    const endIcon = makeIcon("#ea4335");
 
-    /* ── Update UI ── */
     function syncUI() {
         chipStart.className = "step-chip" + (startLatLng ? " done" : " active");
         chipEnd.className = "step-chip" + (endLatLng ? " done" : (!startLatLng ? "" : " active"));
@@ -225,42 +199,76 @@
         btnFind.disabled = !(startLatLng && endLatLng) || isComputing;
     }
 
-    /* ── Map Click ── */
-    map.on("click", function (e) {
-        if (isComputing) return;
+    async function geocodeAndSetPlace(query, isStart) {
+        if (!query || isComputing) return;
 
-        const { lat, lng } = e.latlng;
+        isComputing = true;
+        showToast("Searching...", "info", "search");
 
-        if (!isInBounds(lat, lng)) {
-            showToast("Area not supported. Click within New Delhi.", "warning", "wrong_location");
-            return;
+        try {
+            const resp = await fetch(`${API_BASE}/geocode?query=${encodeURIComponent(query)}`);
+            const data = await resp.json();
+
+            if (data.error) {
+                showToast(data.error, "warning", "place");
+                isComputing = false;
+                return;
+            }
+
+            const latlng = L.latLng(parseFloat(data.lat), parseFloat(data.lon));
+
+            if (isStart) {
+                if (startMarker) map.removeLayer(startMarker);
+                startMarker = L.marker(latlng, { icon: startIcon }).addTo(map);
+                startLatLng = latlng;
+                inputStart.value = data.display_name;
+                inputStart.classList.add("filled");
+                dotStart.classList.add("filled");
+                map.setView(latlng, 15);
+            } else {
+                if (endMarker) map.removeLayer(endMarker);
+                endMarker = L.marker(latlng, { icon: endIcon }).addTo(map);
+                endLatLng = latlng;
+                inputEnd.value = data.display_name;
+                inputEnd.classList.add("filled");
+                dotEnd.classList.add("filled");
+                if (startLatLng) {
+                    map.fitBounds(L.latLngBounds(startLatLng, latlng), { padding: [60, 60] });
+                } else {
+                    map.setView(latlng, 15);
+                }
+            }
+
+            showToast(`Found: ${data.display_name}`, "info", "check_circle");
+
+        } catch (err) {
+            showToast("Search failed. Try again.", "error", "cloud_off");
         }
 
-        if (!startLatLng) {
-            startLatLng = e.latlng;
-            startMarker = L.marker(e.latlng, { icon: startIcon }).addTo(map);
-            inputStart.textContent = formatCoord(e.latlng);
-            inputStart.classList.add("filled");
-            dotStart.classList.add("filled");
-        } else if (!endLatLng) {
-            endLatLng = e.latlng;
-            endMarker = L.marker(e.latlng, { icon: endIcon }).addTo(map);
-            inputEnd.textContent = formatCoord(e.latlng);
-            inputEnd.classList.add("filled");
-            dotEnd.classList.add("filled");
-        }
-
+        isComputing = false;
         syncUI();
+    }
+
+    btnSearchStart.addEventListener("click", function () {
+        geocodeAndSetPlace(inputStart.value.trim(), true);
     });
 
-    /* ── Find Route ── */
+    btnSearchEnd.addEventListener("click", function () {
+        geocodeAndSetPlace(inputEnd.value.trim(), false);
+    });
+
+    inputStart.addEventListener("keypress", function (e) {
+        if (e.key === "Enter") geocodeAndSetPlace(inputStart.value.trim(), true);
+    });
+
+    inputEnd.addEventListener("keypress", function (e) {
+        if (e.key === "Enter") geocodeAndSetPlace(inputEnd.value.trim(), false);
+    });
+
     btnFind.addEventListener("click", async function () {
         if (!startLatLng || !endLatLng || isComputing) return;
 
-        const dist = haversineDistance(
-            startLatLng.lat, startLatLng.lng,
-            endLatLng.lat, endLatLng.lng
-        );
+        const dist = haversineDistance(startLatLng.lat, startLatLng.lng, endLatLng.lat, endLatLng.lng);
 
         if (dist < MIN_DISTANCE_M) {
             showToast("Start and end are too close. Pick a farther point.", "warning", "near_me");
@@ -312,12 +320,9 @@
             resDistance.textContent = data.distance_km >= 1
                 ? `${data.distance_km} km`
                 : `${data.distance_m} m`;
-            resTime.textContent = `${data.computation_ms} ms`;
-            resNodes.textContent = data.nodes_traversed.toLocaleString();
-            resPerf.textContent = data.computation_ms < 100 ? "Excellent" : data.computation_ms < 200 ? "Fast" : "OK";
 
             resultsPanel.classList.add("visible");
-            showToast(`Route found — ${data.distance_km} km in ${data.computation_ms} ms`, "info", "check_circle");
+            showToast(`Route found — ${data.distance_km} km`, "info", "check_circle");
 
         } catch (err) {
             showToast("Server unreachable. Check if the backend is running.", "error", "cloud_off");
@@ -328,7 +333,6 @@
         syncUI();
     });
 
-    /* ── Clear Route ── */
     btnClear.addEventListener("click", function () {
         startLatLng = null;
         endLatLng = null;
@@ -336,8 +340,8 @@
         if (endMarker) { map.removeLayer(endMarker); endMarker = null; }
         if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
 
-        inputStart.textContent = "Click map to set start";
-        inputEnd.textContent = "Click map to set end";
+        inputStart.value = "";
+        inputEnd.value = "";
         inputStart.classList.remove("filled");
         inputEnd.classList.remove("filled");
         dotStart.classList.remove("filled");

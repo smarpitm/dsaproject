@@ -1,5 +1,4 @@
 import heapq
-import time
 from collections import defaultdict
 
 import numpy as np
@@ -8,7 +7,9 @@ from scipy.spatial import KDTree
 
 
 class Graph:
-    def __init__(self, nodes_csv: str = "delhi_nodes.csv", edges_csv: str = "delhi_edges.csv"):
+    def __init__(
+        self, nodes_csv: str = "delhi_nodes.csv", edges_csv: str = "delhi_edges.csv"
+    ):
         self.adj: dict[int, list[tuple[int, float]]] = defaultdict(list)
         self.coords: dict[int, tuple[float, float]] = {}
         self._load(nodes_csv, edges_csv)
@@ -69,18 +70,26 @@ class Graph:
 
         return path, dist[end]
 
-    def route(self, start_lat: float, start_lon: float, end_lat: float, end_lon: float) -> dict:
-        t0 = time.perf_counter()
-
+    def route(
+        self, start_lat: float, start_lon: float, end_lat: float, end_lon: float
+    ) -> dict:
         start_node = self.find_nearest_node(start_lat, start_lon)
         end_node = self.find_nearest_node(end_lat, end_lon)
+
+        if start_node == end_node:
+            return {
+                "path": [{"lat": self.coords[start_node][0], "lon": self.coords[start_node][1]}],
+                "distance_m": 0,
+                "distance_km": 0,
+                "nodes_traversed": 1,
+                "start_node": start_node,
+                "end_node": end_node,
+            }
+
         path, distance = self.get_shortest_path(start_node, end_node)
 
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-
         coordinates = [
-            {"lat": self.coords[nid][0], "lon": self.coords[nid][1]}
-            for nid in path
+            {"lat": self.coords[nid][0], "lon": self.coords[nid][1]} for nid in path
         ]
 
         return {
@@ -88,7 +97,6 @@ class Graph:
             "distance_m": round(distance, 2),
             "distance_km": round(distance / 1000, 3),
             "nodes_traversed": len(path),
-            "computation_ms": round(elapsed_ms, 2),
             "start_node": start_node,
             "end_node": end_node,
         }
